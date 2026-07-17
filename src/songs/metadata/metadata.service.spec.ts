@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { NotFoundException } from '@nestjs/common';
-import { MetadataService } from './metadata.service';
+import { MetadataService, PROVIDER_CHAIN_BUDGET_MS } from './metadata.service';
 import { CacheService } from './cache.service';
 import { METADATA_CLIENTS_TOKEN } from './interfaces/metadata-client.interface';
 import { Song } from '../types/song.type';
@@ -196,6 +196,55 @@ describe('MetadataService', () => {
 
       expect(result.artwork).toEqual(['only.jpg']);
       expect(result.name).toBeNull();
+    });
+  });
+
+  describe('provider chain time budget', () => {
+    let nowSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      nowSpy = jest.spyOn(Date, 'now');
+    });
+
+    afterEach(() => {
+      nowSpy.mockRestore();
+    });
+
+    // Simulates a slow first provider: by the time its fetch resolves, the
+    // mocked clock has already advanced past the whole budget.
+    const exhaustBudgetOnFirstProvider = (result: Song | null) => {
+      providers[0].fetch.mockImplementation(() => {
+        nowSpy.mockReturnValue(Date.now() + PROVIDER_CHAIN_BUDGET_MS);
+        return Promise.resolve(result);
+      });
+    };
+
+    it('stops starting providers and returns the partial result when exhausted', async () => {
+      exhaustBudgetOnFirstProvider(makeSong({ name: 'Partial', artist: 'X' }));
+
+      const result = await service.getMetadataSong('q', 'a');
+
+      expect(result.name).toBe('Partial');
+      expect(result.artist).toBe('X');
+      expect(providers[1].fetch).not.toHaveBeenCalled();
+      expect(cache.set).toHaveBeenCalledTimes(1);
+    });
+
+    it('throws NotFoundException when exhausted before any data is found', async () => {
+      exhaustBudgetOnFirstProvider(null);
+
+      await expect(service.getMetadataSong('q', 'a')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(providers[1].fetch).not.toHaveBeenCalled();
+    });
+
+    it('queries every provider while within budget', async () => {
+      providers[0].fetch.mockResolvedValue(makeSong({ name: 'n' }));
+
+      await service.getMetadataSong('q', 'a');
+
+      expect(totalCalls()).toBe(providers.length);
     });
   });
 

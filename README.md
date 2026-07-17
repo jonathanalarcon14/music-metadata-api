@@ -299,14 +299,14 @@ flowchart TD
     P --> M[Merge fields with ??=]
     M -->|state changed| Y[Yield partial Song]
     M -->|no change| D
-    Y --> D{More providers?}
+    Y --> D{More providers within budget?}
     D -->|yes| P
     D -->|no, song has data| R[Save to Redis]
     D -->|no, song empty| E([404 NotFound])
     R --> S
 ```
 
-Both endpoints share the same async generator. The service first checks if the metadata is already in **Redis** — if so, a single event/response with the full cached result is returned immediately. Otherwise, providers are queried sequentially and fields are merged with `??=`, so the first value found is never overwritten. A new state is only yielded when it actually changes (new artwork, lyrics, album, etc.) — `GET /songs` drains every yield and returns the last one, while `GET /songs/stream` forwards each yield to the client as an SSE event as it happens. The loop stops early once every field is populated or the artwork cap is reached. The final state is saved back to Redis. If every provider returns nothing, the request results in `404 NotFound`.
+Both endpoints share the same async generator. The service first checks if the metadata is already in **Redis** — if so, a single event/response with the full cached result is returned immediately. Otherwise, providers are queried sequentially and fields are merged with `??=`, so the first value found is never overwritten. A new state is only yielded when it actually changes (new artwork, lyrics, album, etc.) — `GET /songs` drains every yield and returns the last one, while `GET /songs/stream` forwards each yield to the client as an SSE event as it happens. The loop stops early once every field is populated, the artwork cap is reached, or the request's global time budget runs out. The final state is saved back to Redis. If every provider returns nothing, the request results in `404 NotFound`.
 
 **Audio identification — `POST /songs/identify`**
 
@@ -325,7 +325,7 @@ flowchart TD
     G --> F
 ```
 
-The uploaded file is trimmed to a short sample with `ffmpeg` only when it exceeds `TRIM_THRESHOLD_MB`. Identification providers are queried in order and the first match wins. With `enrich=false`, the identified `name` + `artist` are returned immediately; otherwise they are forwarded to the metadata lookup (which includes the **Redis** cache check). If identification fails entirely, the endpoint responds with `404 NotFound`. If identification succeeds but metadata lookup returns no data, the identified `name` and `artist` are still returned so the client gets at least the basic info.
+The uploaded file is trimmed to a short sample with `ffmpeg` only when it exceeds `TRIM_THRESHOLD_MB`. Identification providers are queried in order — under the same global time budget as the metadata chain — and the first match wins. With `enrich=false`, the identified `name` + `artist` are returned immediately; otherwise they are forwarded to the metadata lookup (which includes the **Redis** cache check). If identification fails entirely, the endpoint responds with `404 NotFound`. If identification succeeds but metadata lookup returns no data, the identified `name` and `artist` are still returned so the client gets at least the basic info.
 
 ### Adding a new provider
 
@@ -367,6 +367,7 @@ That's it — the module and service pick it up automatically via dependency inj
 ### Notes
 
 - All providers fail silently — network or parsing errors fall through to the next source.
+- Both provider chains (metadata and identification) run under a global time budget (30 s each). Each HTTP call is capped individually, but providers run sequentially, so without it the worst case would be the sum of every provider timeout. When the metadata budget is exhausted, the loop stops and whatever has been merged so far is returned (and cached); when the identification budget is exhausted, the remaining providers are skipped and the request results in `404` (identification is first-match-wins).
 - Identical concurrent lookups are deduplicated in-flight: on a cache miss, only the first request runs the provider chain and the rest await its result (prevents cache stampedes against third-party rate limits).
 - Artwork URLs are collected across providers up to `MAX_ARTWORKS` and deduplicated, so the same URL never appears twice.
 - `GET /songs/stream` only emits an event when the merged state actually changes, avoiding redundant events when a provider adds nothing new.

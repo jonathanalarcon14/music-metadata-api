@@ -14,6 +14,13 @@ import {
   METADATA_CLIENTS_TOKEN,
 } from './interfaces/metadata-client.interface';
 
+// Time budget for the whole provider chain. Each HTTP call is capped by the
+// HttpModule timeout, but providers run sequentially, so the worst case is
+// the sum of every provider timeout. When the budget runs out, the loop stops
+// and the fields merged so far are returned as a partial result. An in-flight
+// call is not interrupted, so the effective ceiling is budget + one timeout.
+export const PROVIDER_CHAIN_BUDGET_MS = 30_000;
+
 @Injectable()
 export class MetadataService {
   private readonly logger = new Logger(MetadataService.name);
@@ -51,8 +58,16 @@ export class MetadataService {
 
     const song = emptySong();
     let lastSnapshot = JSON.stringify(song);
+    const deadline = Date.now() + PROVIDER_CHAIN_BUDGET_MS;
 
     for (const source of this.sources) {
+      if (Date.now() >= deadline) {
+        this.logger.warn(
+          'Provider chain budget exhausted — stopping with a partial result',
+        );
+        break;
+      }
+
       try {
         const data = await source.fetch(name, artist);
         if (!data) continue;

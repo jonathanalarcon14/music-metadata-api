@@ -11,6 +11,13 @@ import {
   IDENTIFY_CLIENTS_TOKEN,
 } from './interfaces/identify-client.interface';
 
+// Same rationale as the metadata provider chain: each HTTP call is capped by
+// the HttpModule timeout, but providers run sequentially, so the worst case
+// is the sum of every provider timeout. Identification is first-match-wins,
+// so when the budget runs out the remaining providers are skipped and the
+// request results in a 404.
+export const IDENTIFY_CHAIN_BUDGET_MS = 30_000;
+
 @Injectable()
 export class IdentifyService {
   private readonly logger = new Logger(IdentifyService.name);
@@ -50,9 +57,18 @@ export class IdentifyService {
     let name: string | null = null;
     let artist: string | null = null;
 
+    const deadline = Date.now() + IDENTIFY_CHAIN_BUDGET_MS;
+
     // Individual provider errors are swallowed — the chain continues to the next.
     // If no provider identifies the audio, a 404 is thrown to the client.
     for (const source of this.sources) {
+      if (Date.now() >= deadline) {
+        this.logger.warn(
+          'Identify chain budget exhausted — skipping remaining providers',
+        );
+        break;
+      }
+
       try {
         const result = await source.fetch(sample);
         if (!result) continue;

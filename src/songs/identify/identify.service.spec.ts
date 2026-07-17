@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { NotFoundException } from '@nestjs/common';
-import { IdentifyService } from './identify.service';
+import { IdentifyService, IDENTIFY_CHAIN_BUDGET_MS } from './identify.service';
 import { MetadataService } from '../metadata/metadata.service';
 import { IDENTIFY_CLIENTS_TOKEN } from './interfaces/identify-client.interface';
 import { Song } from '../types/song.type';
@@ -212,6 +212,50 @@ describe('IdentifyService', () => {
       await service.identifyAndEnrich(makeFile(1024));
 
       expect(trimSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('provider chain time budget', () => {
+    // Simulates a slow first provider: by the time its fetch resolves, the
+    // mocked clock has already advanced past the whole budget. The spy is
+    // restored by the global afterEach (jest.restoreAllMocks).
+    const exhaustBudgetOnFirstProvider = (
+      result: { name: string; artist: string } | null,
+    ) => {
+      const nowSpy = jest.spyOn(Date, 'now');
+      identifyProviders[0].fetch.mockImplementation(() => {
+        nowSpy.mockReturnValue(Date.now() + IDENTIFY_CHAIN_BUDGET_MS);
+        return Promise.resolve(result);
+      });
+    };
+
+    it('skips remaining providers and throws NotFound when exhausted without a match', async () => {
+      exhaustBudgetOnFirstProvider(null);
+
+      await expect(service.identifyAndEnrich(makeFile())).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(identifyProviders[1].fetch).not.toHaveBeenCalled();
+      expect(identifyProviders[2].fetch).not.toHaveBeenCalled();
+    });
+
+    it('keeps the match when the matching provider itself exhausts the budget', async () => {
+      exhaustBudgetOnFirstProvider({ name: 'Song', artist: 'Artist' });
+      metadataService.getMetadataSong.mockResolvedValue(makeSong());
+
+      const result = await service.identifyAndEnrich(makeFile());
+
+      expect(result.name).toBe('Song');
+      expect(result.artist).toBe('Artist');
+    });
+
+    it('queries every provider while within budget', async () => {
+      await expect(service.identifyAndEnrich(makeFile())).rejects.toThrow(
+        NotFoundException,
+      );
+      identifyProviders.forEach((p) =>
+        expect(p.fetch).toHaveBeenCalledTimes(1),
+      );
     });
   });
 });
