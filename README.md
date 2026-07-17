@@ -80,7 +80,7 @@ Query parameters:
 | `enrich`  | boolean | no       | `true`  | When `false`, skips metadata enrichment and returns only the identified song |
 
 ```bash
-curl -X POST https://<host>/songs/identify -F "file=@song.mp3"
+curl -X POST https://musicapi.jonathanalarcon.qzz.io/songs/identify -F "file=@song.mp3"
 ```
 
 Response: same shape as `GET /songs`. If no provider recognizes the audio, the endpoint responds `404 Not Found`.
