@@ -229,6 +229,7 @@ src/
 ├── main.ts                          # Bootstrap: Helmet, CORS, ValidationPipe, Swagger
 └── songs/
     ├── dto/
+    │   ├── identify-request.dto.ts
     │   ├── song-request.dto.ts
     │   └── song-response.dto.ts
     ├── types/
@@ -243,7 +244,6 @@ src/
     ├── metadata/
     │   ├── clients/                 # iTunes, Deezer, LRCLIB, Last.fm, lyrics.ovh, MusicBrainz
     │   ├── interfaces/              # IMetadataClient
-    │   ├── types/
     │   ├── cache.service.ts         # Redis cache abstraction
     │   ├── metadata.module.ts
     │   └── metadata.service.ts      # Async generator: sequential merge with ??=, artwork dedup,
