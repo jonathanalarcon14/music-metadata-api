@@ -364,6 +364,34 @@ Providers are injected as a list, so the service code doesn't need to change. Th
 
 That's it — the module and service pick it up automatically via dependency injection. No changes to `MetadataService` / `IdentifyService` or their tests.
 
+### Adding a new metadata field
+
+The `Song` shape is the contract shared by every provider, the merge logic, the cache and the response. To add a new field (say, `duration`), touch these four files:
+
+1. **Extend the type** in `src/songs/types/song.type.ts`:
+
+   ```ts
+   export type Song = {
+     name: string | null;
+     // ...
+     duration: number | null; // ← new field
+   };
+   ```
+
+2. **Update the helpers** in `src/songs/helpers/song.helpers.ts` so `emptySong()` includes the new key and `isSongComplete()` accounts for it (otherwise the loop may stop early or the "complete" check becomes wrong).
+
+3. **Merge it in `MetadataService`** (`src/songs/metadata/metadata.service.ts`) alongside the other scalar fields:
+
+   ```ts
+   song.duration ??= data.duration;
+   ```
+
+   Array-like fields (like `artwork`) need the dedup + cap treatment instead of `??=`.
+
+4. **Expose it in the response** in `src/songs/dto/song-response.dto.ts` with `@ApiProperty` + `@Expose` so it shows up in Swagger and passes the serializer.
+
+Then, in each provider client under `metadata/clients/`, map the field from the provider's payload (or leave it as `null` if the source doesn't have it). Providers that don't return the field simply contribute `null` and the next one fills it in — the `??=` merge handles the fallback for free.
+
 ### Testing
 
 Unit tests live next to the code they cover as `*.spec.ts` files (services, helpers, validators, interceptors, controllers). Provider clients are intentionally not unit-tested — they are thin wrappers over external APIs, so the coverage lives at the service layer with fake client responses. End-to-end tests sit under `test/` and boot the full Nest app with supertest.
