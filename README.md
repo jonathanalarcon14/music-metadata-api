@@ -364,6 +364,19 @@ Providers are injected as a list, so the service code doesn't need to change. Th
 
 That's it — the module and service pick it up automatically via dependency injection. No changes to `MetadataService` / `IdentifyService` or their tests.
 
+### Testing
+
+Unit tests live next to the code they cover as `*.spec.ts` files (services, helpers, validators, interceptors, controllers). Provider clients are intentionally not unit-tested — they are thin wrappers over external APIs, so the coverage lives at the service layer with fake client responses. End-to-end tests sit under `test/` and boot the full Nest app with supertest.
+
+```bash
+npm test              # unit tests
+npm run test:watch    # unit tests in watch mode
+npm run test:cov      # unit tests with coverage report (informational, no gate)
+npm run test:e2e      # end-to-end tests
+```
+
+CI runs `npm test` on every push and pull request; coverage is reported but not enforced.
+
 ### Notes
 
 - All providers fail silently — network or parsing errors fall through to the next source.
